@@ -1,0 +1,88 @@
+name: Build libbox.aar
+
+on:
+  workflow_dispatch:
+    inputs:
+      sing_box_ref:
+        description: "Branch, tag, or commit of SagerNet/sing-box to build"
+        required: true
+        default: "main"
+      release_tag:
+        description: "Release tag to create in this repo"
+        required: true
+        default: "libbox-test"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_NDK_VERSION: "28.0.13004108"
+
+    steps:
+      - name: Checkout sing-box
+        uses: actions/checkout@v4
+        with:
+          repository: SagerNet/sing-box
+          ref: ${{ github.event.inputs.sing_box_ref }}
+          path: sing-box
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.5"
+          cache-dependency-path: sing-box/go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Export Android environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make gcc libc6-dev zip unzip
+
+      - name: Build libbox.aar
+        working-directory: sing-box
+        run: |
+          make lib_install
+          make lib_android
+
+      - name: Verify output
+        working-directory: sing-box
+        run: |
+          ls -lh libbox.aar
+          unzip -l libbox.aar | sed -n '1,120p'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libbox-aar
+          path: sing-box/libbox.aar
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          files: sing-box/libbox.aar
+          generate_release_notes: true
